@@ -4,6 +4,17 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>disable</Nullable>
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <Title>Deconstruct Generator</Title>
+        <Version>1.0.0</Version>
+        <Authors>Uihyung Cheong</Authors>
+        <Product>Deconstruct Generator</Product>
+        <Description>Deconstruct Generator</Description>
+        <PackageProjectUrl>https://github.com/Nappy97/Deconstructer</PackageProjectUrl>
+        <PackageIcon>GeneralSourceGenerator.png</PackageIcon>
+        <RepositoryUrl>https://github.com/Nappy97/Deconstructer.git</RepositoryUrl>
+        <PackageTags>Deconstruct generator</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
@@ -12,6 +23,10 @@
         <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       </PackageReference>
       <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     </ItemGroup>
 
 </Project>

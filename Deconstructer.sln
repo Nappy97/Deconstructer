@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeconstructerGenerator", "DeconstructerGenerator\DeconstructerGenerator.csproj", "{DF135398-933A-4DCA-A565-6FC656344BA6}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deconstructer.NugetTest", "Deconstructer.NugetTest\Deconstructer.NugetTest.csproj", "{263474DA-DCDA-4D66-9B75-1C2A5D0DF92B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +14,9 @@ Global
 		{DF135398-933A-4DCA-A565-6FC656344BA6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DF135398-933A-4DCA-A565-6FC656344BA6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DF135398-933A-4DCA-A565-6FC656344BA6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{263474DA-DCDA-4D66-9B75-1C2A5D0DF92B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{263474DA-DCDA-4D66-9B75-1C2A5D0DF92B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{263474DA-DCDA-4D66-9B75-1C2A5D0DF92B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{263474DA-DCDA-4D66-9B75-1C2A5D0DF92B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

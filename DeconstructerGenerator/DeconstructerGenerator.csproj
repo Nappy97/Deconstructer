@@ -1,32 +1,61 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <LangVersion>Latest</LangVersion>
         <Nullable>disable</Nullable>
         <IncludeBuildOutput>false</IncludeBuildOutput>
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <NoWarn>RS1038;RS2008</NoWarn>
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
         <Title>Deconstruct Generator</Title>
-        <Version>1.0.0</Version>
+        <Version>1.0.22</Version>
         <Authors>Uihyung Cheong</Authors>
         <Product>Deconstruct Generator</Product>
         <Description>Deconstruct Generator</Description>
         <PackageProjectUrl>https://github.com/Nappy97/Deconstructer</PackageProjectUrl>
-        <PackageIcon>GeneralSourceGenerator.png</PackageIcon>
         <RepositoryUrl>https://github.com/Nappy97/Deconstructer.git</RepositoryUrl>
         <PackageTags>Deconstruct generator</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0">
-        <PrivateAssets>all</PrivateAssets>
-        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      </PackageReference>
-      <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+        <!-- Roslyn 패키지: PrivateAssets="all" 필수 (소비자에게 노출 방지) -->
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" PrivateAssets="all" />
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+        <!-- ★ 핵심 수정: DLL 을 두 곳에 모두 복사 -->
+
+        <!-- 1. analyzers: 소스 생성기 실행용 -->
+        <None Include="$(OutputPath)$(AssemblyName).dll"
+              Pack="true"
+              PackagePath="analyzers/dotnet/cs"
+              Visible="false" />
+        <None Include="$(OutputPath)$(AssemblyName).pdb"
+              Pack="true"
+              PackagePath="analyzers/dotnet/cs"
+              Visible="false" />
+
+        <!-- 2. lib: 소비자가 Attribute 참조용 (이게 있어야 심볼 인식됨!) -->
+        <None Include="$(OutputPath)$(AssemblyName).dll"
+              Pack="true"
+              PackagePath="lib/netstandard2.0"
+              Visible="false" />
+        <None Include="$(OutputPath)$(AssemblyName).pdb"
+              Pack="true"
+              PackagePath="lib/netstandard2.0"
+              Visible="false" />
+    </ItemGroup>
+
+
+    <ItemGroup>
+      <Folder Include="nupkgs\" />
     </ItemGroup>
 
 </Project>

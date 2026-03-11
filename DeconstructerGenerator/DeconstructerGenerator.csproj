@@ -3,14 +3,14 @@
     <PropertyGroup>
         <TargetFramework>netstandard2.0</TargetFramework>
         <LangVersion>Latest</LangVersion>
-        <Nullable>disable</Nullable>
+        <Nullable>enable</Nullable>
         <IncludeBuildOutput>false</IncludeBuildOutput>
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
         <NoWarn>RS1038;RS2008</NoWarn>
         <IncludeBuildOutput>false</IncludeBuildOutput>
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
         <Title>Deconstruct Generator</Title>
-        <Version>1.0.22</Version>
+        <Version>1.0.26</Version>
         <Authors>Uihyung Cheong</Authors>
         <Product>Deconstruct Generator</Product>
         <Description>Deconstruct Generator</Description>

@@ -44,86 +44,177 @@ public class DeconstructGenerator : IIncrementalGenerator
         return null;
     }
 
-private static void Execute(IMethodSymbol method, SourceProductionContext context)
-{
-    if (method.ContainingType is not INamedTypeSymbol classSymbol) return;
-
-    string namespaceName = method.ContainingNamespace.IsGlobalNamespace 
-        ? "" 
-        : method.ContainingNamespace.ToDisplayString();
-    
-    string className = classSymbol.Name;
-    string methodName = method.Name;
-    string generatedMethodName = $"{methodName}_Deconstructed";
-
-    // Attribute에서 타입 정보 가져오기
-    var attribute = method.GetAttributes()
-        .FirstOrDefault(ad => ad.AttributeClass?.ToDisplayString() == "DeconstructerGenerator.DeconstructMethodAttribute");
-    
-    var parameterTypesToDeconstruct = GetParameterTypesFromAttribute(attribute);
-    var returnTypeToDeconstruct = GetReturnTypeFromAttribute(attribute);
-
-    // 1. 매개변수 분해
-    var newParameters = new List<string>();
-    for (int i = 0; i < method.Parameters.Length; i++)
+    private static void Execute(IMethodSymbol method, SourceProductionContext context)
     {
-        var param = method.Parameters[i];
+        if (method.ContainingType is not INamedTypeSymbol classSymbol) return;
+
+        string namespaceName = method.ContainingNamespace.IsGlobalNamespace 
+            ? "" 
+            : method.ContainingNamespace.ToDisplayString();
         
-        // Attribute에서 지정한 타입이거나, 자동 감지
-        bool shouldDeconstruct = parameterTypesToDeconstruct != null
-            ? parameterTypesToDeconstruct.Contains(param.Type.ToDisplayString())
-            : ShouldDeconstruct(param.Type);
+        string className = classSymbol.Name;
+        string methodName = method.Name;
+        string generatedMethodName = $"{methodName}_Deconstructed";
+
+        // Attribute에서 타입 정보 가져오기
+        var attribute = method.GetAttributes()
+            .FirstOrDefault(ad => ad.AttributeClass?.ToDisplayString() == "DeconstructerGenerator.DeconstructMethodAttribute");
         
-        if (shouldDeconstruct)
+        var attrParameterTypes = GetParameterTypesFromAttribute(attribute);
+        var attrReturnType = GetReturnTypeFromAttribute(attribute);
+
+        // 디버그 정보 수집
+        var debugInfo = new List<string>();
+        debugInfo.Add($"Attribute ParameterTypes: {(attrParameterTypes != null ? string.Join(", ", attrParameterTypes.Select(t => t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))) : "null")}");
+        debugInfo.Add($"Attribute ReturnType: {(attrReturnType != null ? attrReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) : "null")}");
+
+        // 1. 매개변수 분해
+        var newParameters = new List<string>();
+
+        if (attrParameterTypes != null && attrParameterTypes.Count > 0)
         {
-            var members = GetDeconstructableMembers(param.Type);
-            foreach (var member in members)
+            // ★ Attribute에 ParameterTypes가 있으면 → 그 타입들의 멤버를 직접 분해
+            debugInfo.Add("Using Attribute ParameterTypes for decomposition");
+            foreach (var paramType in attrParameterTypes)
             {
-                newParameters.Add($"{member.Type} {member.Name}");
+                var members = GetDeconstructableMembers(paramType);
+                debugInfo.Add($"  DecomposeType '{paramType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}': Members={members.Count} [{string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"))}]");
+                foreach (var member in members)
+                {
+                    newParameters.Add($"{member.Type} {member.Name}");
+                }
             }
         }
         else
         {
-            newParameters.Add($"{param.Type} {param.Name}");
-        }
-    }
-
-    // 2. 리턴 타입 처리
-    string returnType = "void";
-
-    if (method.ReturnsVoid)
-    {
-        returnType = "void";
-    }
-    else if (method.ReturnType is INamedTypeSymbol returnTypeSymbol)
-    {
-        string returnTypeDisplay = returnTypeSymbol.ToDisplayString();
-        
-        // Task 또는 ValueTask 확인
-        if (returnTypeDisplay.StartsWith("System.Threading.Tasks.Task") || 
-            returnTypeDisplay.StartsWith("System.Threading.Tasks.ValueTask"))
-        {
-            // Task<T> 의 T 추출
-            if (returnTypeSymbol.TypeArguments.Length > 0)
+            // Attribute에 없으면 → 실제 메서드 매개변수를 분석
+            debugInfo.Add("No Attribute ParameterTypes, using method parameters");
+            for (int i = 0; i < method.Parameters.Length; i++)
             {
-                var innerType = returnTypeSymbol.TypeArguments[0];
+                var param = method.Parameters[i];
+                bool shouldDeconstruct = ShouldDeconstruct(param.Type);
+                debugInfo.Add($"  Param[{i}] '{param.Name}': type={param.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}, TypeKind={param.Type.TypeKind}, shouldDeconstruct={shouldDeconstruct}");
                 
-                if (innerType.SpecialType == SpecialType.System_Void)
+                if (shouldDeconstruct)
                 {
-                    returnType = "Task";
+                    var members = GetDeconstructableMembers(param.Type);
+                    debugInfo.Add($"    -> Members found: {members.Count} [{string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"))}]");
+                    foreach (var member in members)
+                    {
+                        newParameters.Add($"{member.Type} {member.Name}");
+                    }
                 }
                 else
                 {
-                    // Attribute에서 지정한 타입이거나, 자동 감지
-                    bool shouldDeconstruct = returnTypeToDeconstruct != null
-                        ? returnTypeToDeconstruct == innerType.ToDisplayString()
-                        : ShouldDeconstruct(innerType);
-                    
+                    newParameters.Add($"{param.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)} {param.Name}");
+                }
+            }
+        }
+
+        // 2. 리턴 타입 처리
+        string returnType = "void";
+
+        // ★ Attribute에 ReturnType이 있으면 → 그 타입의 멤버를 Tuple로 분해
+        string taskWrapper = "";
+
+        if (method.ReturnsVoid)
+        {
+            returnType = "void";
+        }
+        else if (method.ReturnType is INamedTypeSymbol returnTypeSymbol)
+        {
+            string returnTypeDisplay = returnTypeSymbol.ToDisplayString();
+            
+            // Task 또는 ValueTask 확인
+            bool isTask = returnTypeSymbol.OriginalDefinition.ToDisplayString() == "System.Threading.Tasks.Task<TResult>"
+                       || returnTypeSymbol.OriginalDefinition.ToDisplayString() == "System.Threading.Tasks.Task";
+            bool isValueTask = returnTypeSymbol.OriginalDefinition.ToDisplayString() == "System.Threading.Tasks.ValueTask<TResult>"
+                            || returnTypeSymbol.OriginalDefinition.ToDisplayString() == "System.Threading.Tasks.ValueTask";
+
+            taskWrapper = isTask ? "System.Threading.Tasks.Task" : isValueTask ? "System.Threading.Tasks.ValueTask" : "";
+
+            if (attrReturnType != null)
+            {
+                // ★ Attribute에서 지정한 ReturnType의 멤버로 분해
+                debugInfo.Add($"Using Attribute ReturnType for decomposition: {attrReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}");
+                var members = GetDeconstructableMembers(attrReturnType);
+                debugInfo.Add($"  ReturnType Members found: {members.Count} [{string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"))}]");
+
+                if (members.Count > 0)
+                {
+                    var tupleArgs = string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"));
+                    if (isTask || isValueTask)
+                    {
+                        returnType = $"{taskWrapper}<({tupleArgs})>";
+                    }
+                    else
+                    {
+                        returnType = $"({tupleArgs})";
+                    }
+                }
+                else
+                {
+                    returnType = returnTypeDisplay;
+                }
+            }
+            else
+            {
+                // Attribute에 없으면 → 실제 리턴 타입을 분석
+                debugInfo.Add("No Attribute ReturnType, using method return type");
+
+                if (isTask || isValueTask)
+                {
+                    if (returnTypeSymbol.TypeArguments.Length > 0)
+                    {
+                        var innerType = returnTypeSymbol.TypeArguments[0];
+                        debugInfo.Add($"  ReturnType inner: {innerType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}, TypeKind={innerType.TypeKind}");
+
+                        if (innerType.SpecialType == SpecialType.System_Void)
+                        {
+                            returnType = taskWrapper;
+                        }
+                        else
+                        {
+                            bool shouldDeconstruct = ShouldDeconstruct(innerType);
+                            if (shouldDeconstruct)
+                            {
+                                var members = GetDeconstructableMembers(innerType);
+                                if (members.Count > 0)
+                                {
+                                    var tupleArgs = string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"));
+                                    returnType = $"{taskWrapper}<({tupleArgs})>";
+                                }
+                                else
+                                {
+                                    returnType = returnTypeDisplay;
+                                }
+                            }
+                            else
+                            {
+                                returnType = returnTypeDisplay;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        returnType = taskWrapper;
+                    }
+                }
+                else
+                {
+                    bool shouldDeconstruct = ShouldDeconstruct(method.ReturnType);
                     if (shouldDeconstruct)
                     {
-                        var members = GetDeconstructableMembers(innerType);
-                        var tupleArgs = string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"));
-                        returnType = $"Task<({tupleArgs})>";
+                        var members = GetDeconstructableMembers(method.ReturnType);
+                        if (members.Count > 0)
+                        {
+                            var tupleArgs = string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"));
+                            returnType = $"({tupleArgs})";
+                        }
+                        else
+                        {
+                            returnType = returnTypeDisplay;
+                        }
                     }
                     else
                     {
@@ -131,114 +222,99 @@ private static void Execute(IMethodSymbol method, SourceProductionContext contex
                     }
                 }
             }
-            else
-            {
-                returnType = "Task";
-            }
         }
-        else
+
+        // 3. 코드 생성
+        var sourceBuilder = new StringBuilder();
+        sourceBuilder.AppendLine("// <auto-generated/>");
+        sourceBuilder.AppendLine("#nullable enable");
+        
+        // 디버그 정보를 주석으로 출력
+        sourceBuilder.AppendLine("// === DECONSTRUCT DEBUG INFO ===");
+        foreach (var info in debugInfo)
         {
-            // Task 가 아닌 일반 반환 타입
-            bool shouldDeconstruct = returnTypeToDeconstruct != null
-                ? returnTypeToDeconstruct == method.ReturnType.ToDisplayString()
-                : ShouldDeconstruct(method.ReturnType);
-            
-            if (shouldDeconstruct)
-            {
-                var members = GetDeconstructableMembers(method.ReturnType);
-                var tupleArgs = string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"));
-                returnType = $"({tupleArgs})";
-            }
-            else
-            {
-                returnType = returnTypeDisplay;
-            }
+            sourceBuilder.AppendLine($"// {info}");
         }
+        sourceBuilder.AppendLine("// === END DEBUG INFO ===");
+        
+        if (!string.IsNullOrEmpty(namespaceName))
+        {
+            sourceBuilder.AppendLine($"namespace {namespaceName}");
+            sourceBuilder.AppendLine("{");
+        }
+
+        sourceBuilder.AppendLine($"    partial class {className}");
+        sourceBuilder.AppendLine("    {");
+        
+        sourceBuilder.AppendLine($"        private partial {returnType} {generatedMethodName}({string.Join(", ", newParameters)});");
+        
+        sourceBuilder.AppendLine("    }");
+
+        if (!string.IsNullOrEmpty(namespaceName))
+        {
+            sourceBuilder.AppendLine("}");
+        }
+
+        context.AddSource($"{className}_{generatedMethodName}.g.cs", sourceBuilder.ToString());
     }
 
-    // 3. 코드 생성
-    var sourceBuilder = new StringBuilder();
-    sourceBuilder.AppendLine("// <auto-generated/>");
-    sourceBuilder.AppendLine("#nullable enable");
-    
-    if (!string.IsNullOrEmpty(namespaceName))
-    {
-        sourceBuilder.AppendLine($"namespace {namespaceName}");
-        sourceBuilder.AppendLine("{");
-    }
 
-    sourceBuilder.AppendLine($"    partial class {className}");
-    sourceBuilder.AppendLine("    {");
-    
-    sourceBuilder.AppendLine($"        private partial {returnType} {generatedMethodName}({string.Join(", ", newParameters)});");
-    
-    sourceBuilder.AppendLine("    }");
-
-    if (!string.IsNullOrEmpty(namespaceName))
-    {
-        sourceBuilder.AppendLine("}");
-    }
-
-    context.AddSource($"{className}_{generatedMethodName}.g.cs", sourceBuilder.ToString());
-}
-
-
-    private static HashSet<string>? GetParameterTypesFromAttribute(AttributeData? attribute)
+    private static List<ITypeSymbol>? GetParameterTypesFromAttribute(AttributeData? attribute)
     {
         if (attribute == null) return null;
         
-        // ParameterTypes 프로퍼티 찾기
+        // ParameterTypes Named argument 확인
         var paramTypesArg = attribute.NamedArguments
             .FirstOrDefault(kvp => kvp.Key == "ParameterTypes");
         
-        if (paramTypesArg.Value.IsNull) 
+        if (!paramTypesArg.Equals(default(KeyValuePair<string, TypedConstant>)) 
+            && !paramTypesArg.Value.IsNull 
+            && paramTypesArg.Value.Kind == TypedConstantKind.Array)
         {
-            // Constructor 인자 확인
-            if (attribute.ConstructorArguments.Length > 0)
-            {
-                var constructorArg = attribute.ConstructorArguments[0];
-                if (!constructorArg.IsNull && constructorArg.Kind == TypedConstantKind.Array)
-                {
-                    var types = new HashSet<string>();
-                    foreach (var value in constructorArg.Values)
-                    {
-                        if (value.Value is INamedTypeSymbol typeSymbol)
-                        {
-                            types.Add(typeSymbol.ToDisplayString());
-                        }
-                    }
-                    return types.Count > 0 ? types : null;
-                }
-            }
-            return null;
-        }
-        
-        if (paramTypesArg.Value.Kind == TypedConstantKind.Array)
-        {
-            var types = new HashSet<string>();
+            var types = new List<ITypeSymbol>();
             foreach (var value in paramTypesArg.Value.Values)
             {
-                if (value.Value is INamedTypeSymbol typeSymbol)
+                if (value.Value is ITypeSymbol typeSymbol)
                 {
-                    types.Add(typeSymbol.ToDisplayString());
+                    types.Add(typeSymbol);
                 }
             }
             return types.Count > 0 ? types : null;
         }
         
+        // Constructor 인자 확인 (params Type[])
+        if (attribute.ConstructorArguments.Length > 0)
+        {
+            var constructorArg = attribute.ConstructorArguments[0];
+            if (!constructorArg.IsNull && constructorArg.Kind == TypedConstantKind.Array)
+            {
+                var types = new List<ITypeSymbol>();
+                foreach (var value in constructorArg.Values)
+                {
+                    if (value.Value is ITypeSymbol typeSymbol)
+                    {
+                        types.Add(typeSymbol);
+                    }
+                }
+                return types.Count > 0 ? types : null;
+            }
+        }
+        
         return null;
     }
 
-    private static string? GetReturnTypeFromAttribute(AttributeData? attribute)
+    private static ITypeSymbol? GetReturnTypeFromAttribute(AttributeData? attribute)
     {
         if (attribute == null) return null;
         
         var returnTypeArg = attribute.NamedArguments
             .FirstOrDefault(kvp => kvp.Key == "ReturnType");
         
-        if (!returnTypeArg.Value.IsNull && returnTypeArg.Value.Value is INamedTypeSymbol typeSymbol)
+        if (!returnTypeArg.Equals(default(KeyValuePair<string, TypedConstant>))
+            && !returnTypeArg.Value.IsNull 
+            && returnTypeArg.Value.Value is ITypeSymbol typeSymbol)
         {
-            return typeSymbol.ToDisplayString();
+            return typeSymbol;
         }
         
         return null;
@@ -269,19 +345,38 @@ private static void Execute(IMethodSymbol method, SourceProductionContext contex
     private static List<(string Type, string Name)> GetDeconstructableMembers(ITypeSymbol type)
     {
         var members = new List<(string, string)>();
-        foreach (var member in type.GetMembers())
+        var currentType = type;
+        
+        // 상속 계층을 순회하며 모든 public 멤버 수집
+        while (currentType != null && currentType.SpecialType != SpecialType.System_Object)
         {
-            if (member.DeclaredAccessibility == Accessibility.Public && 
-                !member.IsStatic && 
-                member is (IPropertySymbol { IsIndexer: false } or IFieldSymbol))
+            foreach (var member in currentType.GetMembers())
             {
-                string memberType = member switch
+                if (member.DeclaredAccessibility == Accessibility.Public && 
+                    !member.IsStatic)
                 {
-                    IPropertySymbol prop => prop.Type.ToDisplayString(),
-                    IFieldSymbol field => field.Type.ToDisplayString(),
-                };
-                members.Add((memberType, member.Name));
+                    string? memberType = null;
+                    
+                    if (member is IPropertySymbol prop && !prop.IsIndexer)
+                    {
+                        memberType = prop.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    }
+                    else if (member is IFieldSymbol field)
+                    {
+                        memberType = field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    }
+                    
+                    if (memberType != null)
+                    {
+                        // 중복 방지 (자식 클래스에서 override한 경우)
+                        if (!members.Any(m => m.Item2 == member.Name))
+                        {
+                            members.Add((memberType, member.Name));
+                        }
+                    }
+                }
             }
+            currentType = currentType.BaseType;
         }
         return members;
     }

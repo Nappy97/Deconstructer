@@ -10,7 +10,7 @@
         <IncludeBuildOutput>false</IncludeBuildOutput>
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
         <Title>Deconstruct Generator</Title>
-        <Version>1.0.26</Version>
+        <Version>1.0.29</Version>
         <Authors>Uihyung Cheong</Authors>
         <Product>Deconstruct Generator</Product>
         <Description>Deconstruct Generator</Description>

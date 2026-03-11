@@ -61,6 +61,7 @@ public class DeconstructGenerator : IIncrementalGenerator
             .FirstOrDefault(ad => ad.AttributeClass?.ToDisplayString() == "DeconstructerGenerator.DeconstructMethodAttribute");
         
         var attrParameterTypes = GetParameterTypesFromAttribute(attribute);
+        var attrParameterNames = GetParameterNamesFromAttribute(attribute);
         var attrReturnType = GetReturnTypeFromAttribute(attribute);
 
         // 디버그 정보 수집
@@ -73,15 +74,33 @@ public class DeconstructGenerator : IIncrementalGenerator
 
         if (attrParameterTypes != null && attrParameterTypes.Count > 0)
         {
-            // ★ Attribute에 ParameterTypes가 있으면 → 그 타입들의 멤버를 직접 분해
+            // ★ Attribute에 ParameterTypes가 있으면 → 그 타입들의 멤버를 직접 분해 (프리미티브는 제외)
             debugInfo.Add("Using Attribute ParameterTypes for decomposition");
-            foreach (var paramType in attrParameterTypes)
+            for (int i = 0; i < attrParameterTypes.Count; i++)
             {
-                var members = GetDeconstructableMembers(paramType);
-                debugInfo.Add($"  DecomposeType '{paramType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}': Members={members.Count} [{string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"))}]");
-                foreach (var member in members)
+                var paramType = attrParameterTypes[i];
+                // ParameterNames에서 해당 인덱스의 이름 가져오기
+                string paramName = (attrParameterNames != null && i < attrParameterNames.Count) 
+                    ? attrParameterNames[i] 
+                    : "";
+
+                if (ShouldDeconstruct(paramType))
                 {
-                    newParameters.Add($"{member.Type} {member.Name}");
+                    var members = GetDeconstructableMembers(paramType);
+                    debugInfo.Add($"  DecomposeType '{paramType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}': Members={members.Count} [{string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"))}]");
+                    foreach (var member in members)
+                    {
+                        newParameters.Add($"{member.Type} {ToCamelCase(member.Name)}");
+                    }
+                }
+                else
+                {
+                    // 프리미티브 타입: ParameterNames에서 이름 사용, 없으면 타입명 기반
+                    string name = !string.IsNullOrEmpty(paramName) 
+                        ? paramName 
+                        : ToCamelCase(paramType.Name);
+                    debugInfo.Add($"  PrimitiveType '{paramType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}': name='{name}'");
+                    newParameters.Add($"{paramType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {name}");
                 }
             }
         }
@@ -101,12 +120,12 @@ public class DeconstructGenerator : IIncrementalGenerator
                     debugInfo.Add($"    -> Members found: {members.Count} [{string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"))}]");
                     foreach (var member in members)
                     {
-                        newParameters.Add($"{member.Type} {member.Name}");
+                        newParameters.Add($"{member.Type} {ToCamelCase(member.Name)}");
                     }
                 }
                 else
                 {
-                    newParameters.Add($"{param.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)} {param.Name}");
+                    newParameters.Add($"{param.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {param.Name}");
                 }
             }
         }
@@ -131,30 +150,49 @@ public class DeconstructGenerator : IIncrementalGenerator
             bool isValueTask = returnTypeSymbol.OriginalDefinition.ToDisplayString() == "System.Threading.Tasks.ValueTask<TResult>"
                             || returnTypeSymbol.OriginalDefinition.ToDisplayString() == "System.Threading.Tasks.ValueTask";
 
-            taskWrapper = isTask ? "System.Threading.Tasks.Task" : isValueTask ? "System.Threading.Tasks.ValueTask" : "";
+            taskWrapper = isTask ? "Task" : isValueTask ? "ValueTask" : "";
 
             if (attrReturnType != null)
             {
-                // ★ Attribute에서 지정한 ReturnType의 멤버로 분해
-                debugInfo.Add($"Using Attribute ReturnType for decomposition: {attrReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}");
-                var members = GetDeconstructableMembers(attrReturnType);
-                debugInfo.Add($"  ReturnType Members found: {members.Count} [{string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"))}]");
-
-                if (members.Count > 0)
+                // ★ Attribute에서 지정한 ReturnType 처리
+                debugInfo.Add($"Using Attribute ReturnType: {attrReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}");
+                
+                if (ShouldDeconstruct(attrReturnType))
                 {
-                    var tupleArgs = string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"));
-                    if (isTask || isValueTask)
+                    // 클래스 타입 → 멤버로 분해하여 Tuple
+                    var members = GetDeconstructableMembers(attrReturnType);
+                    debugInfo.Add($"  ReturnType Members found: {members.Count} [{string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"))}]");
+
+                    if (members.Count > 0)
                     {
-                        returnType = $"{taskWrapper}<({tupleArgs})>";
+                        var tupleArgs = string.Join(", ", members.Select(m => $"{m.Type} {m.Name}"));
+                        if (isTask || isValueTask)
+                        {
+                            returnType = $"{taskWrapper}<({tupleArgs})>";
+                        }
+                        else
+                        {
+                            returnType = $"({tupleArgs})";
+                        }
                     }
                     else
                     {
-                        returnType = $"({tupleArgs})";
+                        returnType = returnTypeDisplay;
                     }
                 }
                 else
                 {
-                    returnType = returnTypeDisplay;
+                    // 프리미티브 타입 → 그대로 리턴
+                    debugInfo.Add($"  ReturnType is primitive, keep as-is: {attrReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}");
+                    string attrReturnTypeName = attrReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+                    if (isTask || isValueTask)
+                    {
+                        returnType = $"{taskWrapper}<{attrReturnTypeName}>";
+                    }
+                    else
+                    {
+                        returnType = attrReturnTypeName;
+                    }
                 }
             }
             else
@@ -320,6 +358,28 @@ public class DeconstructGenerator : IIncrementalGenerator
         return null;
     }
 
+    private static List<string>? GetParameterNamesFromAttribute(AttributeData? attribute)
+    {
+        if (attribute == null) return null;
+        
+        var paramNamesArg = attribute.NamedArguments
+            .FirstOrDefault(kvp => kvp.Key == "ParameterNames");
+        
+        if (!paramNamesArg.Equals(default(KeyValuePair<string, TypedConstant>))
+            && !paramNamesArg.Value.IsNull 
+            && paramNamesArg.Value.Kind == TypedConstantKind.Array)
+        {
+            var names = new List<string>();
+            foreach (var value in paramNamesArg.Value.Values)
+            {
+                names.Add(value.Value as string ?? "");
+            }
+            return names.Count > 0 ? names : null;
+        }
+        
+        return null;
+    }
+
     private static bool ShouldDeconstruct(ITypeSymbol type)
     {
         // Primitive 타입, enum 등 제외
@@ -359,11 +419,11 @@ public class DeconstructGenerator : IIncrementalGenerator
                     
                     if (member is IPropertySymbol prop && !prop.IsIndexer)
                     {
-                        memberType = prop.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                        memberType = prop.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
                     }
                     else if (member is IFieldSymbol field)
                     {
-                        memberType = field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                        memberType = field.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
                     }
                     
                     if (memberType != null)
@@ -379,5 +439,12 @@ public class DeconstructGenerator : IIncrementalGenerator
             currentType = currentType.BaseType;
         }
         return members;
+    }
+
+    private static string ToCamelCase(string name)
+    {
+        if (string.IsNullOrEmpty(name) || char.IsLower(name[0])) return name;
+        if (name.Length == 1) return name.ToLowerInvariant();
+        return char.ToLowerInvariant(name[0]) + name.Substring(1);
     }
 }
